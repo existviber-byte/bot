@@ -1,9 +1,9 @@
 import asyncio
 import json
-import random
 import logging
-import re
+import random
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery
@@ -20,13 +20,16 @@ TOKEN = "8042067501:AAGfCGdiFbggUTMZZ7i49XKAA_EUmFNHVgg"
 ADMIN_ID = 411379361
 CHAT_ID = -1001234567890
 
-DATA_PROMO = "data/promocodes.json"
-DATA_USERS = "data/users.json"
-LOG_FILE = "data/bot.log"
+DATA_DIR = Path("data")
+DATA_PROMO = DATA_DIR / "promocodes.json"
+DATA_USERS = DATA_DIR / "users.json"
+LOG_FILE = DATA_DIR / "bot.log"
 
 tz = pytz.timezone("Europe/Moscow")
 
 # ================= LOGGING =================
+
+DATA_DIR.mkdir(exist_ok=True)  # создаём папку data, если нет
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,27 +45,26 @@ log = logging.getLogger("bot")
 # ================= UTILS =================
 
 def load(path, default):
+    if not path.exists():
+        save(path, default)
+        return default
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
         return default
 
 def save(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-
-def valid_steam(steamid: str):
-    return re.fullmatch(r"7656119\d{10}", steamid)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 # ================= FSM =================
 
 class AdminFSM(StatesGroup):
     addpromo = State()
     delpromo = State()
-    delsteam = State()
     broadcast = State()
-    broadcast_confirm = State()  # новое состояние для подтверждения рассылки
+    broadcast_confirm = State()  # подтверждение рассылки
 
 # ================= BOT =================
 
@@ -75,7 +77,6 @@ scheduler = AsyncIOScheduler()
 def main_kb():
     kb = InlineKeyboardBuilder()
     kb.button(text="🎁 Промокод", callback_data="promo")
-    kb.button(text="🔗 Привязать Steam", callback_data="steam")
     kb.adjust(1)
     return kb.as_markup()
 
@@ -85,7 +86,6 @@ def admin_kb():
     kb.button(text="➖ Удалить промо", callback_data="a_del")
     kb.button(text="📋 Список", callback_data="a_list")
     kb.button(text="👥 Пользователи", callback_data="a_users")
-    kb.button(text="❌ Удалить Steam", callback_data="a_delsteam")
     kb.button(text="📢 Рассылка", callback_data="a_bc")
     kb.adjust(2)
     return kb.as_markup()
@@ -94,6 +94,17 @@ def admin_kb():
 
 @dp.message(Command("start"))
 async def start(m: Message):
+    users = load(DATA_USERS, {})
+
+    user_id = str(m.from_user.id)
+    if user_id not in users:
+        users[user_id] = {
+            "username": m.from_user.username or "",
+            "first_name": m.from_user.first_name or ""
+        }
+        save(DATA_USERS, users)
+        log.info(f"NEW USER SUBSCRIBED {user_id}")
+
     await m.answer("🔥 Hostile Rust\n\nВыбери действие:", reply_markup=main_kb())
 
 @dp.callback_query(F.data == "promo")
@@ -105,30 +116,6 @@ async def promo(cb: CallbackQuery):
     code = random.choice(promos)
     await cb.message.answer(f"🎁 Твой промокод:\n<code>{code}</code>", parse_mode="HTML")
     log.info(f"PROMO -> {cb.from_user.id} = {code}")
-
-@dp.callback_query(F.data == "steam")
-async def steam(cb: CallbackQuery):
-    await cb.message.answer("Отправь SteamID:")
-    await dp.fsm.set_state(cb.from_user.id, AdminFSM.delsteam)
-
-@dp.message(AdminFSM.delsteam)
-async def steam_save(m: Message, state: FSMContext):
-    steam = m.text.strip()
-
-    if not valid_steam(steam):
-        return await m.answer("❌ Неверный SteamID")
-
-    users = load(DATA_USERS, {})
-
-    if str(m.from_user.id) in users:
-        return await m.answer("Steam уже привязан")
-
-    users[str(m.from_user.id)] = steam
-    save(DATA_USERS, users)
-
-    await state.clear()
-    await m.answer("✅ SteamID привязан")
-    log.info(f"STEAM LINK {m.from_user.id} -> {steam}")
 
 # ================= ADMIN =================
 
@@ -146,7 +133,6 @@ async def a_add(cb: CallbackQuery, state: FSMContext):
 @dp.message(AdminFSM.addpromo)
 async def addpromo(m: Message, state: FSMContext):
     promos = load(DATA_PROMO, [])
-
     if m.text in promos:
         return await m.answer("Уже существует")
 
@@ -165,7 +151,6 @@ async def a_del(cb: CallbackQuery, state: FSMContext):
 @dp.message(AdminFSM.delpromo)
 async def delpromo(m: Message, state: FSMContext):
     promos = load(DATA_PROMO, [])
-
     if m.text not in promos:
         return await m.answer("Не найден")
 
@@ -184,7 +169,7 @@ async def listpromo(cb: CallbackQuery):
 @dp.callback_query(F.data == "a_users")
 async def listusers(cb: CallbackQuery):
     users = load(DATA_USERS, {})
-    text = "\n".join([f"{k} → {v}" for k,v in users.items()])
+    text = "\n".join([f"{k} → {v['username']} ({v['first_name']})" for k,v in users.items()])
     await cb.message.answer(text or "Пусто")
 
 # ================= BROADCAST =================
