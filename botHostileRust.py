@@ -16,7 +16,7 @@ import pytz
 
 # ================= CONFIG =================
 
-TOKEN = "7773566553:AAFxAVcGHnQk5SUQVY4EfgQDMxoVtWjnUo8"
+TOKEN = "8042067501:AAGfCGdiFbggUTMZZ7i49XKAA_EUmFNHVgg"
 ADMIN_ID = 411379361
 CHAT_ID = -1001234567890
 
@@ -228,3 +228,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
