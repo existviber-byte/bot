@@ -1,3 +1,5 @@
+import a2s
+from aiogram.types import InlineKeyboardButton
 import asyncio
 import json
 import logging
@@ -16,7 +18,9 @@ import pytz
 
 # ================= CONFIG =================
 
-TOKEN = "8042067501:AAGfCGdiFbggUTMZZ7i49XKAA_EUmFNHVgg"
+import os
+
+TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_IDS = [411379361]  # Список админов
 CHAT_ID = -1001234567890
 
@@ -72,7 +76,39 @@ def remove_expired_promos():
         else:
             new_promos.append(promo)
     save(DATA_PROMO, new_promos)
+    
+async def get_server_status(ip, port):
+    loop = asyncio.get_running_loop()
 
+    try:
+        info = await loop.run_in_executor(
+            None,
+            lambda: a2s.info((ip, port), timeout=3)
+        )
+
+        return {
+            "online": True,
+            "players": info.player_count,
+            "max": info.max_players
+        }
+
+    except:
+        return {"online": False}
+        
+def schedule():
+    wipe = next_wipe()
+
+    scheduler.add_job(
+        wipe_notify,
+        "date",
+        run_date=wipe
+    )
+
+    scheduler.add_job(
+        wipe_warning,
+        "date",
+        run_date=wipe - timedelta(hours=1)
+    )
 # ================= FSM =================
 
 class AdminFSM(StatesGroup):
@@ -95,6 +131,9 @@ def main_kb():
     kb.button(text="📜 Моя история промокодов", callback_data="history")
     kb.button(text="🛒 Пополнить баланс", url="http://hostilerust.gamestores.app/")
     kb.button(text="❓ Информация", callback_data="info")
+    kb.button(text="🎮 Онлайн серверов", callback_data="servers")
+    kb.button(text="⏳ До вайпа", callback_data="wipe")
+    kb.button(text="📋 IP серверов", callback_data="ips")
     kb.adjust(2)
     return kb.as_markup()
 
@@ -134,6 +173,15 @@ async def start(m: Message):
 
 @dp.callback_query(F.data == "promo")
 async def promo(cb: CallbackQuery):
+    users = load(DATA_USERS, {})
+    uid = str(cb.from_user.id)
+
+    last = users.get(uid, {}).get("last_promo")
+
+    if last:
+        last = datetime.fromisoformat(last)
+        if datetime.now() - last < timedelta(hours=24):
+            return await cb.message.answer("⏳ Вы уже получали промокод сегодня.")
     remove_expired_promos()
     promos = load(DATA_PROMO, [])
     if not promos:
@@ -155,6 +203,8 @@ async def promo(cb: CallbackQuery):
     log.info(f"PROMO -> {cb.from_user.id} = {code}")
 
     users = load(DATA_USERS, {})
+    users[uid]["last_promo"] = datetime.now().isoformat()
+    save(DATA_USERS, users)
     user_id = str(cb.from_user.id)
     if user_id in users:
         if "history" not in users[user_id]:
@@ -175,9 +225,6 @@ async def history(cb: CallbackQuery):
 async def info(cb: CallbackQuery):
     text = (
         "❓ *Информация о промокодах и сервере*\n\n"
-        "📜 IP серверов Hostile Rust\n\n"
-        "✅ Hostile Rust x5: connect 37.230.137.6:20600\n"
-        "✅ Hostile Rust x100: connect 46.174.50.248:20640\n\n"
         "🎁 Промокоды:\n"
         "- Выдается через бота\n"
         "- Чтобы активировать, используйте на сайте: http://hostilerust.gamestores.app/\n\n"
@@ -190,6 +237,19 @@ async def info(cb: CallbackQuery):
         "- Соблюдать общие правила Hostile Rust"
     )
     await cb.message.answer(text, parse_mode="Markdown")
+
+async def auto_online_log():
+    x5 = await get_server_status("37.230.137.6", 20600)
+    x100 = await get_server_status("46.174.50.248", 20640)
+    log.info(f"AUTO ONLINE x5={x5} x100={x100}")
+    
+async def wipe_notify():
+    users = load(DATA_USERS, {})
+    for uid in users:
+        try:
+            await bot.send_message(uid, "💣 ВАЙП серверов Hostile Rust!")
+        except:
+            pass
 
 # ================= ADMIN =================
 
@@ -289,6 +349,51 @@ async def stats(cb: CallbackQuery):
 
 # ================= BROADCAST =================
 
+@dp.callback_query(F.data == "servers")
+async def servers(cb: CallbackQuery):
+
+    x5 = get_server_status("37.230.137.6", 20600)
+    x100 = get_server_status("46.174.50.248", 20640)
+
+    def fmt(name, data):
+        if not data["online"]:
+            return f"🔴 {name}: оффлайн"
+        return f"🟢 {name}: {data['players']}/{data['max']}"
+
+    text = (
+        "🎮 *Статус серверов Hostile Rust*\n\n"
+        f"{fmt('x5', x5)}\n"
+        f"{fmt('x100', x100)}"
+    )
+
+    await cb.message.answer(text, parse_mode="Markdown")
+    
+@dp.callback_query(F.data == "ips")
+async def ips(cb: CallbackQuery):
+
+    kb = InlineKeyboardBuilder()
+
+    kb.button(
+        text="📋 Подключиться x5",
+        url="steam://connect/37.230.137.6:20600"
+    )
+
+    kb.button(
+        text="📋 Подключиться x100",
+        url="steam://connect/46.174.50.248:20640"
+    )
+
+    kb.adjust(1)
+
+    await cb.message.answer(
+        "📜 IP серверов Hostile Rust\n\n"
+        "<code>37.230.137.6:20600</code>\n"
+        "<code>46.174.50.248:20640</code>\n\n"
+        "Можно нажать кнопку или скопировать IP 👇",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML"
+    )
+
 @dp.callback_query(F.data == "a_bc")
 async def bc_start(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
@@ -318,7 +423,10 @@ async def bc_send(cb: CallbackQuery, state: FSMContext):
     users = load(DATA_USERS, {})
     sent = 0
     if cb.data == "bc_send_new":
-        targets = [u for u in users if not users[u].get("history")]
+        targets = [
+    uid for uid, data in users.items()
+    if not data.get("history")
+]
     else:
         targets = users.keys()
     for u in targets:
@@ -340,27 +448,51 @@ async def bc_cancel(cb: CallbackQuery, state: FSMContext):
 
 # ================= WIPE =================
 
-async def wipe_notify():
-    await bot.send_message(CHAT_ID, "💣 ВАЙП HOSTILE RUST!")
-
-def schedule():
+def next_wipe():
     now = datetime.now(tz)
-    for i in range(60):
+
+    for i in range(14):
         d = now + timedelta(days=i)
         if d.weekday() == 3:
             hour = 22 if d.day <= 7 else 12
-            scheduler.add_job(wipe_notify, "date",
-                run_date=tz.localize(datetime(d.year,d.month,d.day,hour)))
+            wipe = tz.localize(datetime(d.year, d.month, d.day, hour))
+            if wipe > now:
+                return wipe
 
+@dp.callback_query(F.data == "wipe")
+async def wipe_timer(cb: CallbackQuery):
+    wipe = next_wipe()
+    now = datetime.now(tz)
+
+    diff = wipe - now
+
+    days = diff.days
+    hours = diff.seconds // 3600
+    minutes = (diff.seconds % 3600) // 60
+
+    text = (
+        "💣 *Следующий вайп на серверах Hostile Rust*\n\n"
+        f"⏳ Осталось:\n"
+        f"🗓 {days} дн\n"
+        f"🕒 {hours} ч\n"
+        f"⏱ {minutes} мин"
+    )
+
+    await cb.message.answer(text, parse_mode="Markdown")
+    
+async def wipe_notify():
+    await bot.send_message(CHAT_ID, "💣 ВАЙП СЕРВЕРОВ HOSTILE RUST!")
+    
+async def wipe_warning():
+    await bot.send_message(CHAT_ID, "⚠️ Через 1 час вайп серверов Hostile Rust!")
 # ================= START =================
 
 async def main():
     schedule()
     scheduler.start()
+    scheduler.add_job(auto_online_log, "interval", minutes=5)
     log.info("BOT STARTED")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
