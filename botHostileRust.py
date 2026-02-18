@@ -20,7 +20,7 @@ import pytz
 
 import os
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("BOTIK_TOKEN")
 ADMIN_IDS = [411379361]  # Список админов
 CHAT_ID = -1001234567890
 
@@ -496,3 +496,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
