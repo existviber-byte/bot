@@ -62,6 +62,7 @@ class AdminFSM(StatesGroup):
     delpromo = State()
     delsteam = State()
     broadcast = State()
+    broadcast_confirm = State()  # новое состояние для подтверждения рассылки
 
 # ================= BOT =================
 
@@ -186,23 +187,57 @@ async def listusers(cb: CallbackQuery):
     text = "\n".join([f"{k} → {v}" for k,v in users.items()])
     await cb.message.answer(text or "Пусто")
 
+# ================= BROADCAST =================
+
 @dp.callback_query(F.data == "a_bc")
-async def bc(cb: CallbackQuery, state: FSMContext):
+async def bc_start(cb: CallbackQuery, state: FSMContext):
+    if cb.from_user.id != ADMIN_ID:
+        return
     await state.set_state(AdminFSM.broadcast)
-    await cb.message.answer("Текст рассылки:")
+    await cb.message.answer("Введите текст рассылки:")
 
 @dp.message(AdminFSM.broadcast)
-async def broadcast(m: Message, state: FSMContext):
+async def bc_text(m: Message, state: FSMContext):
+    if m.from_user.id != ADMIN_ID:
+        return
+
+    await state.update_data(bc_text=m.text)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📤 Отправить всем", callback_data="bc_send")
+    kb.button(text="❌ Удалить", callback_data="bc_cancel")
+    kb.adjust(2)
+
+    await state.set_state(AdminFSM.broadcast_confirm)
+    await m.answer(f"Текст рассылки:\n\n{m.text}", reply_markup=kb.as_markup())
+
+@dp.callback_query(F.data == "bc_send")
+async def bc_send(cb: CallbackQuery, state: FSMContext):
+    if cb.from_user.id != ADMIN_ID:
+        return
+
+    data = await state.get_data()
+    text = data.get("bc_text")
     users = load(DATA_USERS, {})
+
+    sent = 0
     for u in users:
         try:
-            await bot.send_message(u, m.text)
+            await bot.send_message(u, text)
+            sent += 1
         except:
             pass
 
     await state.clear()
-    await m.answer("📢 Рассылка завершена")
-    log.info("ADMIN BROADCAST")
+    await cb.message.edit_text(f"📢 Рассылка завершена\nОтправлено: {sent} пользователям")
+    log.info(f"ADMIN BROADCAST -> {sent} users")
+
+@dp.callback_query(F.data == "bc_cancel")
+async def bc_cancel(cb: CallbackQuery, state: FSMContext):
+    if cb.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    await cb.message.edit_text("❌ Рассылка удалена")
 
 # ================= WIPE =================
 
@@ -228,4 +263,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
