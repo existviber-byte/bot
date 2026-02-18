@@ -245,7 +245,17 @@ async def listpromo(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
     promos = load(DATA_PROMO, [])
-    text = "\n".join([f"🎫 {p['code']}" for p in promos]) if promos else "Пусто"
+    if not promos:
+        await cb.message.answer("📄 Список промокодов пуст")
+        return
+
+    text_list = []
+    for p in promos:
+        if isinstance(p, dict) and "code" in p:
+            text_list.append(f"🎫 {p['code']}")
+        elif isinstance(p, str):
+            text_list.append(f"🎫 {p}")
+    text = "\n".join(text_list) if text_list else "📄 Список промокодов пуст"
     await cb.message.answer(text)
 
 @dp.callback_query(F.data == "a_users")
