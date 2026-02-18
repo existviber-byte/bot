@@ -374,24 +374,23 @@ async def ips(cb: CallbackQuery):
     kb = InlineKeyboardBuilder()
 
     kb.button(
-        text="📋 Подключиться x5",
-        url="steam://connect/37.230.137.6:20600"
+        text="📋 Скопировать Hostile x5",
+        switch_inline_query_current_chat="connect 37.230.137.6:20600"
     )
 
     kb.button(
-        text="📋 Подключиться x100",
-        url="steam://connect/46.174.50.248:20640"
+        text="📋 Скопировать Hostile x100",
+        switch_inline_query_current_chat="connect 46.174.50.248:20640"
     )
 
     kb.adjust(1)
 
     await cb.message.answer(
-        "📜 IP серверов Hostile Rust\n\n"
-        "<code>37.230.137.6:20600</code>\n"
-        "<code>46.174.50.248:20640</code>\n\n"
-        "Можно нажать кнопку или скопировать IP 👇",
+        "📜 *IP серверов Hostile Rust*\n\n"
+        "Нажми кнопку — команда появится в поле ввода.\n"
+        "Дальше просто скопируй 👇",
         reply_markup=kb.as_markup(),
-        parse_mode="HTML"
+        parse_mode="Markdown"
     )
 
 @dp.callback_query(F.data == "a_bc")
@@ -496,4 +495,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
