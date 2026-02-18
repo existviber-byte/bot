@@ -176,8 +176,8 @@ async def info(cb: CallbackQuery):
     text = (
         "❓ *Информация о промокодах и сервере*\n\n"
         "📜 IP серверов Hostile Rust\n\n"
-        "✅ Hostile Rust x5:<code>hostile-rust.mods.alkad.online</code>\n"
-        "✅ Hostile Rust x100:<code>hostile-rust.mods.x100.alkad.online</code>\n\n"
+        "✅ Hostile Rust x5: connect 37.230.137.6:20600\n"
+        "✅ Hostile Rust x100: connect 46.174.50.248:20640\n\n"
         "🎁 Промокоды:\n"
         "- Выдается через бота\n"
         "- Чтобы активировать, используйте на сайте: http://hostilerust.gamestores.app/\n\n"
@@ -362,4 +362,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
