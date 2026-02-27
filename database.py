@@ -52,6 +52,18 @@ class Database:
             """, (telegram_id, username, first_name))
             await db.commit()
 
+    # В database.py
+    async def get_last_ticket(self, telegram_id):
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute("""
+                SELECT created_at FROM tickets
+                WHERE telegram_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (telegram_id,))
+            row = await cursor.fetchone()
+            return row[0] if row else None
+    
     async def update_last_promo(self, telegram_id):
         async with aiosqlite.connect(self.path) as db:
             await db.execute("""
