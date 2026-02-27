@@ -3,7 +3,6 @@ from pathlib import Path
 
 DB_PATH = Path("bot.db")
 
-
 class Database:
     def __init__(self, path=DB_PATH):
         self.path = path
@@ -29,8 +28,22 @@ class Database:
                 )
             """)
 
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS tickets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER,
+                    username TEXT,
+                    first_name TEXT,
+                    text TEXT,
+                    status TEXT DEFAULT 'open',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    answered_at TIMESTAMP
+                )
+            """)
+
             await db.commit()
 
+    # ===== USERS =====
     async def add_user(self, telegram_id, username, first_name):
         async with aiosqlite.connect(self.path) as db:
             await db.execute("""
@@ -55,8 +68,31 @@ class Database:
                 WHERE telegram_id = ?
             """, (telegram_id,))
             row = await cursor.fetchone()
-            return row[0] if row and row[0] else None
+            return row[0] if row else None
 
+    async def count_users(self):
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute("SELECT COUNT(*) FROM users")
+            return (await cursor.fetchone())[0]
+
+    async def get_all_user_ids(self):
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute("SELECT telegram_id FROM users")
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
+
+    async def get_users_without_promos(self):
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute("""
+                SELECT u.telegram_id
+                FROM users u
+                LEFT JOIN promo_history p ON u.telegram_id = p.telegram_id
+                WHERE p.telegram_id IS NULL
+            """)
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
+
+    # ===== PROMO =====
     async def add_promo_history(self, telegram_id, code):
         async with aiosqlite.connect(self.path) as db:
             await db.execute("""
@@ -75,30 +111,35 @@ class Database:
             """, (telegram_id,))
             return await cursor.fetchall()
 
-    async def count_users(self):
-        async with aiosqlite.connect(self.path) as db:
-            cursor = await db.execute("SELECT COUNT(*) FROM users")
-            return (await cursor.fetchone())[0]
-
     async def count_total_promos(self):
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute("SELECT COUNT(*) FROM promo_history")
             return (await cursor.fetchone())[0]
 
-    async def get_all_user_ids(self):
+    # ===== TICKETS =====
+    async def add_ticket(self, telegram_id, username, first_name, text):
         async with aiosqlite.connect(self.path) as db:
-            cursor = await db.execute("SELECT telegram_id FROM users")
-            rows = await cursor.fetchall()
-            return [row[0] for row in rows]
+            await db.execute("""
+                INSERT INTO tickets (telegram_id, username, first_name, text)
+                VALUES (?, ?, ?, ?)
+            """, (telegram_id, username, first_name, text))
+            await db.commit()
 
-    async def get_users_without_promos(self):
+    async def get_open_tickets(self):
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute("""
-                SELECT u.telegram_id
-                FROM users u
-                LEFT JOIN promo_history p
-                ON u.telegram_id = p.telegram_id
-                WHERE p.telegram_id IS NULL
+                SELECT id, telegram_id, username, first_name, text
+                FROM tickets
+                WHERE status='open'
+                ORDER BY created_at ASC
             """)
-            rows = await cursor.fetchall()
-            return [row[0] for row in rows]
+            return await cursor.fetchall()
+
+    async def answer_ticket(self, ticket_id):
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("""
+                UPDATE tickets
+                SET status='closed', answered_at=CURRENT_TIMESTAMP
+                WHERE id=?
+            """, (ticket_id,))
+            await db.commit()
