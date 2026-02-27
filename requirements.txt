@@ -2,3 +2,4 @@ aiogram==3.25.0
 apscheduler
 pytz
 python-a2s
+aiosqlite
