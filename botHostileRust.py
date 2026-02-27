@@ -154,7 +154,6 @@ def admin_kb():
 
 @dp.message(Command("start"))
 async def start(m: Message):
-
     await db.add_user(
         m.from_user.id,
         m.from_user.username or "",
@@ -163,11 +162,17 @@ async def start(m: Message):
 
     welcome_text = (
         f"🔥 Привет, {m.from_user.first_name or 'Игрок'}!\n\n"
-        "Добро пожаловать в *Hostile Rust*!\n"
+        "Добро пожаловать в информационного бота от серверов *Hostile Rust*!\n"
         "Выбери действие ниже ⬇️"
     )
 
-    await m.answer(welcome_text, reply_markup=main_kb(), parse_mode="Markdown")
+    # Отправляем только одно сообщение с меню, фото можно добавить через send_photo
+    await m.answer_photo(
+        photo="https://i.postimg.cc/MpnY9Pdc/IMG-3850.png",  # путь к изображению
+        caption=welcome_text,
+        reply_markup=main_kb(),
+        parse_mode="Markdown"
+    )
 
 @dp.callback_query(F.data == "promo")
 async def promo(cb: CallbackQuery):
@@ -356,9 +361,8 @@ async def stats(cb: CallbackQuery):
 
 @dp.callback_query(F.data == "servers")
 async def servers(cb: CallbackQuery):
-
-    x5 = get_server_status("37.230.137.6", 20600)
-    x100 = get_server_status("46.174.50.248", 20640)
+    x5 = await get_server_status("37.230.137.6", 20600)      # <--- await
+    x100 = await get_server_status("46.174.50.248", 20640)   # <--- await
 
     def fmt(name, data):
         if not data["online"]:
@@ -513,6 +517,7 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
     
+
 
 
 
