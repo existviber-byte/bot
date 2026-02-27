@@ -306,14 +306,10 @@ async def link_raid(cb: CallbackQuery):
     
 @dp.callback_query(F.data == "ask_question")
 async def ask_question(cb: CallbackQuery, state: FSMContext):
-    users = load(DATA_USERS, {})
-    uid = str(cb.from_user.id)
-
-    last_ticket = users.get(uid, {}).get("last_ticket")
-
+    last_ticket = await db.get_last_ticket(cb.from_user.id)
     if last_ticket:
-        last_ticket = datetime.fromisoformat(last_ticket)
-        if datetime.now() - last_ticket < timedelta(minutes=TICKET_COOLDOWN_MINUTES):
+        last_ticket_dt = datetime.fromisoformat(last_ticket)
+        if datetime.now() - last_ticket_dt < timedelta(minutes=TICKET_COOLDOWN_MINUTES):
             return await cb.message.answer(
                 f"⏳ Вы можете создавать вопрос только раз в {TICKET_COOLDOWN_MINUTES} минут."
             )
@@ -494,10 +490,7 @@ async def listpromo(cb: CallbackQuery):
 
 @dp.message(TicketFSM.waiting_question)
 async def save_question(m: Message, state: FSMContext):
-    # Проверяем лимит тикетов за X минут
-    last = await db.get_last_promo(m.from_user.id)  # Можно сделать отдельное поле last_ticket
-    # для простоты оставим проверку через last_promo или добавим last_ticket в users
-
+    # Сохраняем тикет в БД
     await db.add_ticket(m.from_user.id, m.from_user.username or "", m.from_user.first_name or "", m.text)
     await state.clear()
     await m.answer("✅ Ваш вопрос отправлен администрации *Hostile Rust*! Ожидайте ответа.")
@@ -518,7 +511,7 @@ async def save_question(m: Message, state: FSMContext):
             f"📝 {m.text}",
             reply_markup=kb.as_markup()
         )
-
+        
 @dp.callback_query(F.data == "a_tickets")
 async def list_tickets(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
@@ -791,5 +784,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
