@@ -77,6 +77,25 @@ class Database:
             """, (telegram_id,))
             return await cursor.fetchall()
 
+    async def get_all_user_ids(self):
+    async with aiosqlite.connect(self.path) as db:
+        cursor = await db.execute("SELECT telegram_id FROM users")
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+
+async def get_users_without_promos(self):
+    async with aiosqlite.connect(self.path) as db:
+        cursor = await db.execute("""
+            SELECT u.telegram_id
+            FROM users u
+            LEFT JOIN promo_history p
+            ON u.telegram_id = p.telegram_id
+            WHERE p.telegram_id IS NULL
+        """)
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+    
     async def count_users(self):
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute("SELECT COUNT(*) FROM users")
