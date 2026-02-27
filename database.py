@@ -10,7 +10,6 @@ class Database:
 
     async def init(self):
         async with aiosqlite.connect(self.path) as db:
-            # Пользователи
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     telegram_id INTEGER PRIMARY KEY,
@@ -21,7 +20,6 @@ class Database:
                 )
             """)
 
-            # История выданных промокодов
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS promo_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +55,7 @@ class Database:
                 WHERE telegram_id = ?
             """, (telegram_id,))
             row = await cursor.fetchone()
-            return row[0] if row else None
+            return row[0] if row and row[0] else None
 
     async def add_promo_history(self, telegram_id, code):
         async with aiosqlite.connect(self.path) as db:
@@ -77,25 +75,6 @@ class Database:
             """, (telegram_id,))
             return await cursor.fetchall()
 
-    async def get_all_user_ids(self):
-    async with aiosqlite.connect(self.path) as db:
-        cursor = await db.execute("SELECT telegram_id FROM users")
-        rows = await cursor.fetchall()
-        return [row[0] for row in rows]
-
-
-async def get_users_without_promos(self):
-    async with aiosqlite.connect(self.path) as db:
-        cursor = await db.execute("""
-            SELECT u.telegram_id
-            FROM users u
-            LEFT JOIN promo_history p
-            ON u.telegram_id = p.telegram_id
-            WHERE p.telegram_id IS NULL
-        """)
-        rows = await cursor.fetchall()
-        return [row[0] for row in rows]
-    
     async def count_users(self):
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute("SELECT COUNT(*) FROM users")
@@ -105,3 +84,21 @@ async def get_users_without_promos(self):
         async with aiosqlite.connect(self.path) as db:
             cursor = await db.execute("SELECT COUNT(*) FROM promo_history")
             return (await cursor.fetchone())[0]
+
+    async def get_all_user_ids(self):
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute("SELECT telegram_id FROM users")
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
+
+    async def get_users_without_promos(self):
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute("""
+                SELECT u.telegram_id
+                FROM users u
+                LEFT JOIN promo_history p
+                ON u.telegram_id = p.telegram_id
+                WHERE p.telegram_id IS NULL
+            """)
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
