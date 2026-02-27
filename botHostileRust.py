@@ -1,4 +1,5 @@
 import a2s
+import aiosqlite
 from aiogram.types import InlineKeyboardButton
 import asyncio
 import json
@@ -490,7 +491,12 @@ async def wipe_timer(cb: CallbackQuery):
     await cb.message.answer(text, parse_mode="Markdown")
     
 async def wipe_notify():
-    await bot.send_message(CHAT_ID, "💣 ВАЙП СЕРВЕРОВ HOSTILE RUST!")
+    user_ids = await db.get_all_user_ids()
+    for uid in user_ids:
+        try:
+            await bot.send_message(uid, "💣 ВАЙП серверов Hostile Rust!")
+        except:
+            pass
     
 async def wipe_warning():
     await bot.send_message(CHAT_ID, "⚠️ Через 1 час вайп серверов Hostile Rust!")
@@ -509,6 +515,7 @@ if __name__ == "__main__":
 @dp.startup()
 async def on_startup():
     await db.init()
+
 
 
 
