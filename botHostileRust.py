@@ -503,6 +503,7 @@ async def wipe_warning():
 # ================= START =================
 
 async def main():
+    await db.init()  # <-- важно, чтобы таблицы точно были созданы
     schedule()
     scheduler.start()
     scheduler.add_job(auto_online_log, "interval", minutes=5)
@@ -512,9 +513,7 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
     
-@dp.startup()
-async def on_startup():
-    await db.init()
+
 
 
 
