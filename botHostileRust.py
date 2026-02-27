@@ -15,7 +15,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import pytz
+from database import Database
 
+db = Database()
 # ================= CONFIG =================
 
 import os
@@ -495,5 +497,9 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
+@dp.startup()
+async def on_startup():
+    await db.init()
 
 
