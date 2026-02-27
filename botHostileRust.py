@@ -28,7 +28,6 @@ CHAT_ID = -1001234567890
 
 DATA_DIR = Path("data")
 DATA_PROMO = DATA_DIR / "promocodes.json"
-DATA_USERS = DATA_DIR / "users.json"
 LOG_FILE = DATA_DIR / "bot.log"
 
 PROMO_EXPIRATION_DAYS = 30  # Срок действия промокодов
@@ -154,16 +153,12 @@ def admin_kb():
 
 @dp.message(Command("start"))
 async def start(m: Message):
-    users = load(DATA_USERS, {})
-    user_id = str(m.from_user.id)
-    if user_id not in users:
-        users[user_id] = {
-            "username": m.from_user.username or "",
-            "first_name": m.from_user.first_name or "",
-            "history": []  # сюда будем сохранять выданные промокоды
-        }
-        save(DATA_USERS, users)
-        log.info(f"🎉 NEW USER SUBSCRIBED {user_id}")
+
+    await db.add_user(
+        m.from_user.id,
+        m.from_user.username or "",
+        m.from_user.first_name or ""
+    )
 
     welcome_text = (
         f"🔥 Привет, {m.from_user.first_name or 'Игрок'}!\n\n"
@@ -175,53 +170,53 @@ async def start(m: Message):
 
 @dp.callback_query(F.data == "promo")
 async def promo(cb: CallbackQuery):
-    users = load(DATA_USERS, {})
-    uid = str(cb.from_user.id)
 
-    last = users.get(uid, {}).get("last_promo")
+    user_id = cb.from_user.id
+
+    # проверяем когда получал последний
+    last = await db.get_last_promo(user_id)
 
     if last:
-        last = datetime.fromisoformat(last)
-        if datetime.now() - last < timedelta(hours=24):
+        last_dt = datetime.fromisoformat(last)
+        if datetime.now() - last_dt < timedelta(hours=24):
             return await cb.message.answer("⏳ Вы уже получали промокод сегодня.")
+
     remove_expired_promos()
     promos = load(DATA_PROMO, [])
+
     if not promos:
         return await cb.message.answer("❌ К сожалению, промокоды закончились 😢")
 
     promo_item = random.choice(promos)
-    if isinstance(promo_item, dict):
-        code = promo_item["code"]
-    else:
-        code = promo_item
+    code = promo_item["code"] if isinstance(promo_item, dict) else promo_item
 
-    msg = (
+    await cb.message.answer(
         f"🎁 Ваш уникальный промокод:\n\n"
         f"<code>{code}</code>\n\n"
-        "💡 Чтобы активировать его, перейдите на сайт:\n"
-        "👉 http://hostilerust.gamestores.app/"
+        "👉 http://hostilerust.gamestores.app/",
+        parse_mode="HTML"
     )
-    await cb.message.answer(msg, parse_mode="HTML")
-    log.info(f"PROMO -> {cb.from_user.id} = {code}")
 
-    users = load(DATA_USERS, {})
-    users[uid]["last_promo"] = datetime.now().isoformat()
-    save(DATA_USERS, users)
-    user_id = str(cb.from_user.id)
-    if user_id in users:
-        if "history" not in users[user_id]:
-            users[user_id]["history"] = []
-        users[user_id]["history"].append(code)
-        save(DATA_USERS, users)
+    # сохраняем в БД
+    await db.add_promo_history(user_id, code)
+    await db.update_last_promo(user_id)
+
+    log.info(f"PROMO -> {user_id} = {code}")
 
 @dp.callback_query(F.data == "history")
 async def history(cb: CallbackQuery):
-    users = load(DATA_USERS, {})
-    user_id = str(cb.from_user.id)
-    if user_id not in users or not users[user_id].get("history"):
+
+    history_data = await db.get_user_history(cb.from_user.id)
+
+    if not history_data:
         return await cb.message.answer("📜 У вас пока нет выданных промокодов")
-    history_list = "\n".join([f"🎫 {p}" for p in users[user_id]["history"]])
-    await cb.message.answer(f"📜 Ваша история промокодов:\n\n{history_list}")
+
+    text = "📜 Ваша история промокодов:\n\n"
+
+    for code, date in history_data:
+        text += f"🎫 {code} ({date})\n"
+
+    await cb.message.answer(text)
 
 @dp.callback_query(F.data == "info")
 async def info(cb: CallbackQuery):
@@ -246,7 +241,6 @@ async def auto_online_log():
     log.info(f"AUTO ONLINE x5={x5} x100={x100}")
     
 async def wipe_notify():
-    users = load(DATA_USERS, {})
     for uid in users:
         try:
             await bot.send_message(uid, "💣 ВАЙП серверов Hostile Rust!")
@@ -327,26 +321,34 @@ async def listpromo(cb: CallbackQuery):
 async def listusers(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
-    users = load(DATA_USERS, {})
-    text = "\n".join([f"👤 {v['first_name']} (@{v['username']})" for v in users.values()]) or "Пусто"
+
+    async with aiosqlite.connect("bot.db") as db_conn:
+        cursor = await db_conn.execute("SELECT first_name, username FROM users")
+        users = await cursor.fetchall()
+
+    if not users:
+        return await cb.message.answer("Пусто")
+
+    text = "\n".join(
+        f"👤 {u[0]} (@{u[1]})" for u in users
+    )
+
     await cb.message.answer(text)
 
 @dp.callback_query(F.data == "a_stats")
 async def stats(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
         return
-    users = load(DATA_USERS, {})
-    promos = load(DATA_PROMO, [])
-    total_users = len(users)
-    total_promos = sum(len(u.get("history", [])) for u in users.values())
-    most_active = max(users.items(), key=lambda x: len(x[1].get("history", [])))[1] if users else None
-    active_text = f"{most_active['first_name']} (@{most_active['username']})" if most_active else "Нет"
+
+    total_users = await db.count_users()
+    total_promos = await db.count_total_promos()
+
     text = (
         f"📊 Статистика бота:\n\n"
         f"👥 Подписано пользователей: {total_users}\n"
-        f"🎁 Всего выдано промокодов: {total_promos}\n"
-        f"🏆 Самый активный игрок: {active_text}"
+        f"🎁 Всего выдано промокодов: {total_promos}"
     )
+
     await cb.message.answer(text)
 
 # ================= BROADCAST =================
@@ -419,25 +421,31 @@ async def bc_text(m: Message, state: FSMContext):
 async def bc_send(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
         return
+
     data = await state.get_data()
     text = data.get("bc_text")
-    users = load(DATA_USERS, {})
+
     sent = 0
+
+    # ✅ Берём пользователей из БД
     if cb.data == "bc_send_new":
-        targets = [
-    uid for uid, data in users.items()
-    if not data.get("history")
-]
+        targets = await db.get_users_without_promos()
     else:
-        targets = users.keys()
-    for u in targets:
+        targets = await db.get_all_user_ids()
+
+    for user_id in targets:
         try:
-            await bot.send_message(u, text)
+            await bot.send_message(user_id, text)
             sent += 1
+            await asyncio.sleep(0.05)  # защита от лимитов Telegram
         except:
             pass
+
     await state.clear()
-    await cb.message.edit_text(f"✅ Рассылка завершена!\nОтправлено: {sent} пользователям")
+    await cb.message.edit_text(
+        f"✅ Рассылка завершена!\nОтправлено: {sent} пользователям"
+    )
+
     log.info(f"ADMIN BROADCAST -> {sent} users")
 
 @dp.callback_query(F.data == "bc_cancel")
@@ -501,5 +509,6 @@ if __name__ == "__main__":
 @dp.startup()
 async def on_startup():
     await db.init()
+
 
 
