@@ -742,11 +742,13 @@ async def view_ingame_message(cb: CallbackQuery, state: FSMContext):
         text += f"\n✅ <b>Ответ отправлен:</b>\n{reply}"
         await cb.message.edit_text(text, reply_markup=admin_kb(), parse_mode="HTML")
     else:
+        # ИСПРАВЛЕНО: Используем те же имена полей, что ожидаются в send_ingame_reply_from_button
         await state.update_data(
-            ingame_msg_id=msg_id, 
-            ingame_player=player_name, 
-            ingame_steam_id=steam_id, 
-            ingame_server=server_name
+            reply_steam_id=steam_id,
+            reply_player_name=player_name,
+            reply_message_id=msg_id,
+            reply_server=server_name,
+            reply_original_message=message
         )
         await state.set_state(AdminFSM.ingame_answer)
         
@@ -758,7 +760,7 @@ async def view_ingame_message(cb: CallbackQuery, state: FSMContext):
             reply_markup=kb.as_markup(),
             parse_mode="HTML"
         )
-
+        
 @dp.message(AdminFSM.ingame_answer)
 async def send_ingame_reply_from_button(m: Message, state: FSMContext):
     """Отправляет ответ игроку после нажатия на кнопку"""
@@ -768,6 +770,7 @@ async def send_ingame_reply_from_button(m: Message, state: FSMContext):
     data = await state.get_data()
     steam_id = data.get("reply_steam_id")
     player_name = data.get("reply_player_name")
+    msg_id = data.get("reply_message_id")
     
     if not steam_id or not player_name:
         await m.answer("❌ Ошибка: данные не найдены")
@@ -779,18 +782,26 @@ async def send_ingame_reply_from_button(m: Message, state: FSMContext):
     # Отправляем на сервер
     await m.answer("⏳ Отправка ответа...")
     
-    success = await send_reply_to_server(steam_id, player_name, reply_text)
+    success, server_name = await send_reply_to_server(steam_id, player_name, reply_text)
     
     if success:
-        await m.answer(f"✅ Ответ отправлен игроку {player_name}!")
+        # Обновляем статус в БД
+        await db.update_message_reply(msg_id, reply_text)
+        
+        await m.answer(f"✅ Ответ отправлен игроку {player_name} на сервере {server_name}!")
         
         # Отправляем подтверждение в чат с кнопкой
         await m.answer(
-            f"📤 *Ответ доставлен*\n\n👤 {player_name}\n📝 {reply_text}",
+            f"📤 *Ответ доставлен*\n\n👤 {player_name}\n🆔 {steam_id}\n🌍 {server_name}\n📝 {reply_text}",
             parse_mode="Markdown"
         )
+        
+        # Логируем
+        log.info(f"ADMIN REPLY TO {player_name} ({steam_id}) on {server_name}: {reply_text}")
     else:
-        await m.answer(f"❌ Не удалось отправить ответ. Игрок оффлайн?")
+        # Сохраняем как недоставленное
+        await db.update_message_reply(msg_id, f"[НЕ ДОСТАВЛЕНО - ИГРОК ОФФЛАЙН]\n{reply_text}")
+        await m.answer(f"❌ Игрок {player_name} оффлайн. Ответ сохранен для повторной отправки.")
     
     await state.clear()
 
@@ -811,34 +822,59 @@ async def retry_offline_messages(cb: CallbackQuery):
     
     sent = 0
     failed = 0
+    results = []
     
-    for msg in undelivered[:10]:
+    for msg in undelivered:
         msg_id, player_name, steam_id, message, server_ip, server_port, status, reply, _, created = msg
         
+        # Определяем сервер
         server_name = "x5" if "37.230.137.6" in server_ip else "x100"
         rcon = await get_rcon_client(server_name)
         
         if not rcon:
             failed += 1
+            results.append(f"❌ {player_name}: RCON ошибка")
             continue
         
+        # Проверяем онлайн
         is_online = await rcon.is_player_online(steam_id)
         
         if is_online:
-            clean_reply = reply.replace("[НЕ ДОСТАВЛЕНО - ИГРОК ОФФЛАЙН]\n", "")
-            result = await rcon.send_private_message(steam_id, clean_reply)
+            # Извлекаем чистый текст ответа (убираем метку о недоставке)
+            clean_reply = reply
+            if clean_reply.startswith("[НЕ ДОСТАВЛЕНО"):
+                clean_reply = clean_reply.split("\n", 1)[-1] if "\n" in clean_reply else clean_reply
+            
+            # Отправляем
+            result = await rcon.send_private_message(steam_id, player_name, clean_reply)
             if result:
                 await db.update_message_reply(msg_id, clean_reply)
                 sent += 1
+                results.append(f"✅ {player_name}: доставлено на {server_name}")
             else:
                 failed += 1
+                results.append(f"❌ {player_name}: ошибка отправки")
         else:
             failed += 1
+            results.append(f"⏸ {player_name}: все еще оффлайн")
+        
+        # Небольшая задержка между отправками
+        await asyncio.sleep(0.5)
+    
+    # Показываем результаты
+    result_text = f"📊 <b>Результат повторной отправки:</b>\n\n✅ Отправлено: {sent}\n❌ Не удалось: {failed}\n\n"
+    result_text += "\n".join(results[:10])  # Показываем только первые 10 для читаемости
+    
+    if len(results) > 10:
+        result_text += f"\n...и еще {len(results) - 10}"
     
     await cb.message.edit_text(
-        f"📊 Результат:\n✅ Отправлено: {sent}\n❌ Не удалось: {failed}",
-        reply_markup=admin_kb()
+        result_text,
+        reply_markup=admin_kb(),
+        parse_mode="HTML"
     )
+    
+    log.info(f"RETRY OFFLINE: sent={sent}, failed={failed}")
 # ================= BROADCAST =================
 
 @dp.callback_query(F.data == "servers")
@@ -1066,6 +1102,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
