@@ -75,10 +75,11 @@ class Database:
             ''')
             return await cursor.fetchall()
 
+    # Добавьте этот метод в класс Database в файле database.py
     async def get_undelivered_messages(self):
         """Получить все недоставленные сообщения"""
-        async with aiosqlite.connect(self.path) as db:
-            cursor = await db.execute('''
+        async with aiosqlite.connect(self.path) as conn:
+            cursor = await conn.execute('''
                 SELECT * FROM ingame_messages 
                 WHERE reply LIKE '%[НЕ ДОСТАВЛЕНО%' 
                 ORDER BY created_at DESC
