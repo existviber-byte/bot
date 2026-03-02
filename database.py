@@ -52,6 +52,57 @@ class Database:
             """, (telegram_id, username, first_name))
             await db.commit()
 
+    # Добавьте после существующих методов, перед последней скобкой класса
+
+    async def save_ingame_message(self, player_name, steam_id, message, server_ip, server_port):
+        """Сохранить сообщение от игрока с сервера"""
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute('''
+                INSERT INTO ingame_messages 
+                (player_name, player_steam_id, message, server_ip, server_port)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (player_name, steam_id, message, server_ip, server_port))
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_pending_messages(self):
+        """Получить все неотвеченные сообщения"""
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute('''
+                SELECT * FROM ingame_messages 
+                WHERE status = 'pending' 
+                ORDER BY created_at DESC
+            ''')
+            return await cursor.fetchall()
+
+    async def get_undelivered_messages(self):
+        """Получить все недоставленные сообщения"""
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute('''
+                SELECT * FROM ingame_messages 
+                WHERE reply LIKE '%[НЕ ДОСТАВЛЕНО%' 
+                ORDER BY created_at DESC
+            ''')
+            return await cursor.fetchall()
+
+    async def update_message_reply(self, message_id, reply_text):
+        """Обновить сообщение с ответом админа"""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute('''
+                UPDATE ingame_messages 
+                SET reply = ?, status = 'answered', reply_sent_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (reply_text, message_id))
+            await db.commit()
+
+    async def get_message_by_id(self, message_id):
+        """Получить сообщение по ID"""
+        async with aiosqlite.connect(self.path) as db:
+            cursor = await db.execute(
+                "SELECT * FROM ingame_messages WHERE id = ?", 
+                (message_id,)
+            )
+            return await cursor.fetchone()
     # В database.py
     async def get_last_ticket(self, telegram_id):
         async with aiosqlite.connect(self.path) as db:
