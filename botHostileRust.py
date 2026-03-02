@@ -82,26 +82,21 @@ def remove_expired_promos():
     save(DATA_PROMO, new_promos)
  
 async def send_reply_to_server(steam_id, player_name, reply_text):
-    """Отправляет ответ на тот сервер, где сейчас игрок"""
+    """Отправляет ответ на сервер (плагин сам сохранит если игрок оффлайн)"""
     
-    # Проверяем x5
+    # Пробуем отправить на x5
     rcon_x5 = await get_rcon_client("x5")
     if rcon_x5:
-        online_x5 = await rcon_x5.is_player_online(steam_id)
-        if online_x5:
-            # Передаем player_name в функцию
-            result = await rcon_x5.send_private_message(steam_id, player_name, reply_text)
-            if result and "OK" in str(result):
-                return True, "x5"
+        result = await rcon_x5.send_private_message(steam_id, player_name, reply_text)
+        if result:
+            return True, "x5"
     
-    # Проверяем x100
+    # Пробуем отправить на x100
     rcon_x100 = await get_rcon_client("x100")
     if rcon_x100:
-        online_x100 = await rcon_x100.is_player_online(steam_id)
-        if online_x100:
-            result = await rcon_x100.send_private_message(steam_id, player_name, reply_text)
-            if result and "OK" in str(result):
-                return True, "x100"
+        result = await rcon_x100.send_private_message(steam_id, player_name, reply_text)
+        if result:
+            return True, "x100"
     
     return False, None
 
@@ -1102,6 +1097,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
 
 
