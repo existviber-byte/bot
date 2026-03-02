@@ -3,3 +3,4 @@ apscheduler
 pytz
 python-a2s
 aiosqlite
+websockets
