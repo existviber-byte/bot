@@ -7,7 +7,7 @@ import logging
 import random
 from datetime import datetime, timedelta
 from pathlib import Path
-
+from rcon_client import get_rcon_client
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
@@ -80,7 +80,31 @@ def remove_expired_promos():
         else:
             new_promos.append(promo)
     save(DATA_PROMO, new_promos)
+ 
+async def send_reply_to_server(steam_id, player_name, reply_text):
+    """Отправляет ответ на тот сервер, где сейчас игрок"""
     
+    # Проверяем x5
+    rcon_x5 = await get_rcon_client("x5")
+    if rcon_x5:
+        online_x5 = await rcon_x5.is_player_online(steam_id)
+        if online_x5:
+            # Передаем player_name в функцию
+            result = await rcon_x5.send_private_message(steam_id, player_name, reply_text)
+            if result and "OK" in str(result):
+                return True, "x5"
+    
+    # Проверяем x100
+    rcon_x100 = await get_rcon_client("x100")
+    if rcon_x100:
+        online_x100 = await rcon_x100.is_player_online(steam_id)
+        if online_x100:
+            result = await rcon_x100.send_private_message(steam_id, player_name, reply_text)
+            if result and "OK" in str(result):
+                return True, "x100"
+    
+    return False, None
+
 async def get_server_status(ip: str, port: int):
     loop = asyncio.get_running_loop()
 
@@ -124,6 +148,7 @@ class AdminFSM(StatesGroup):
     broadcast = State()
     broadcast_confirm = State()
     ticket_answer = State()
+    ingame_answer = State()
 
 class TicketFSM(StatesGroup):
     waiting_question = State()
@@ -163,6 +188,8 @@ def admin_kb():
     kb.button(text="👥 Список пользователей", callback_data="a_users")
     kb.button(text="📊 Статистика", callback_data="a_stats")
     kb.button(text="📩 Все вопросы", callback_data="a_tickets")
+    kb.button(text="🎮 Сообщения с сервера", callback_data="a_ingame_messages")
+    kb.button(text="🔄 Повторная отправка", callback_data="a_retry_offline")  # И эту
     kb.button(text="📢 Рассылка", callback_data="a_bc")
     kb.button(text="⬅ Назад в меню", callback_data="admin_exit")
     kb.adjust(2)
@@ -607,7 +634,211 @@ async def stats(cb: CallbackQuery):
         text,
         reply_markup=admin_kb()
     )
+@dp.message(Command("testws"))
+async def test_websocket(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    await message.answer("🔄 Тестирую WebSocket RCON...")
+    
+    for server in ["x5", "x100"]:
+        rcon = await get_rcon_client(server)
+        if not rcon:
+            await message.answer(f"❌ {server}: не удалось создать клиент")
+            continue
+        
+        # Тест подключения
+        result = await rcon.send_command("status")
+        await rcon.close()
+        
+        if result:
+            await message.answer(f"✅ {server}: WebSocket работает!\n{result[:100]}...")
+        else:
+            await message.answer(f"❌ {server}: WebSocket не отвечает")   
+    
+@dp.message(Command("testrcon"))
+async def test_rcon(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    await message.answer("🔍 Тестирую RCON подключения...")
+    
+    results = []
+    
+    for server_name in ["x5", "x100"]:
+        rcon = await get_rcon_client(server_name)
+        if not rcon:
+            results.append(f"❌ {server_name}: Не удалось создать подключение")
+            continue
+        
+        # Тестовая команда
+        result = await rcon.send_command("status")
+        if result:
+            results.append(f"✅ {server_name}: RCON работает!")
+        else:
+            results.append(f"❌ {server_name}: RCON не отвечает (проверьте пароль/порт)")
+    
+    await message.answer("\n".join(results))
+# ========== НОВЫЕ ОБРАБОТЧИКИ ДЛЯ СООБЩЕНИЙ С СЕРВЕРА ==========
 
+@dp.callback_query(F.data == "a_ingame_messages")
+async def list_ingame_messages(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    
+    messages = await db.get_pending_messages()
+    
+    if not messages:
+        return await cb.message.edit_text(
+            "📭 Нет новых сообщений с сервера",
+            reply_markup=admin_kb()
+        )
+    
+    kb = InlineKeyboardBuilder()
+    
+    for msg in messages[:10]:
+        msg_id, player_name, steam_id, message, server_ip, server_port, status, reply, _, created = msg
+        short_msg = message[:30] + "..." if len(message) > 30 else message
+        
+        kb.button(
+            text=f"🎮 {player_name}: {short_msg}",
+            callback_data=f"ingame_view_{msg_id}"
+        )
+    
+    kb.button(text="⬅ Назад", callback_data="admin_back")
+    kb.adjust(1)
+    
+    await cb.message.edit_text(
+        "📩 <b>Сообщения с сервера:</b>\n\nВыберите для ответа:",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("ingame_view_"))
+async def view_ingame_message(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return
+    
+    msg_id = int(cb.data.split("_")[-1])
+    msg = await db.get_message_by_id(msg_id)
+    
+    if not msg:
+        return await cb.answer("❌ Сообщение не найдено", show_alert=True)
+    
+    msg_id, player_name, steam_id, message, server_ip, server_port, status, reply, _, created = msg
+    
+    server_name = "x5" if "37.230.137.6" in server_ip else "x100"
+    
+    text = (
+        f"🎮 <b>Сообщение с сервера #{msg_id}</b>\n\n"
+        f"👤 Игрок: {player_name}\n"
+        f"🆔 Steam ID: {steam_id}\n"
+        f"🌍 Сервер: {server_name}\n"
+        f"📅 Время: {created}\n\n"
+        f"📝 <b>Вопрос:</b>\n{message}\n"
+    )
+    
+    if reply:
+        text += f"\n✅ <b>Ответ отправлен:</b>\n{reply}"
+        await cb.message.edit_text(text, reply_markup=admin_kb(), parse_mode="HTML")
+    else:
+        await state.update_data(
+            ingame_msg_id=msg_id, 
+            ingame_player=player_name, 
+            ingame_steam_id=steam_id, 
+            ingame_server=server_name
+        )
+        await state.set_state(AdminFSM.ingame_answer)
+        
+        kb = InlineKeyboardBuilder()
+        kb.button(text="❌ Отмена", callback_data="a_ingame_messages")
+        
+        await cb.message.edit_text(
+            text + "\n\n✏️ Введите ответ для игрока:",
+            reply_markup=kb.as_markup(),
+            parse_mode="HTML"
+        )
+
+@dp.message(AdminFSM.ingame_answer)
+async def send_ingame_reply_from_button(m: Message, state: FSMContext):
+    """Отправляет ответ игроку после нажатия на кнопку"""
+    if not is_admin(m.from_user.id):
+        return
+    
+    data = await state.get_data()
+    steam_id = data.get("reply_steam_id")
+    player_name = data.get("reply_player_name")
+    
+    if not steam_id or not player_name:
+        await m.answer("❌ Ошибка: данные не найдены")
+        await state.clear()
+        return
+    
+    reply_text = m.text
+    
+    # Отправляем на сервер
+    await m.answer("⏳ Отправка ответа...")
+    
+    success = await send_reply_to_server(steam_id, player_name, reply_text)
+    
+    if success:
+        await m.answer(f"✅ Ответ отправлен игроку {player_name}!")
+        
+        # Отправляем подтверждение в чат с кнопкой
+        await m.answer(
+            f"📤 *Ответ доставлен*\n\n👤 {player_name}\n📝 {reply_text}",
+            parse_mode="Markdown"
+        )
+    else:
+        await m.answer(f"❌ Не удалось отправить ответ. Игрок оффлайн?")
+    
+    await state.clear()
+
+@dp.callback_query(F.data == "a_retry_offline")
+async def retry_offline_messages(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    
+    await cb.answer("🔄 Проверяю...")
+    
+    undelivered = await db.get_undelivered_messages()
+    
+    if not undelivered:
+        return await cb.message.edit_text(
+            "✅ Нет недоставленных сообщений",
+            reply_markup=admin_kb()
+        )
+    
+    sent = 0
+    failed = 0
+    
+    for msg in undelivered[:10]:
+        msg_id, player_name, steam_id, message, server_ip, server_port, status, reply, _, created = msg
+        
+        server_name = "x5" if "37.230.137.6" in server_ip else "x100"
+        rcon = await get_rcon_client(server_name)
+        
+        if not rcon:
+            failed += 1
+            continue
+        
+        is_online = await rcon.is_player_online(steam_id)
+        
+        if is_online:
+            clean_reply = reply.replace("[НЕ ДОСТАВЛЕНО - ИГРОК ОФФЛАЙН]\n", "")
+            result = await rcon.send_private_message(steam_id, clean_reply)
+            if result:
+                await db.update_message_reply(msg_id, clean_reply)
+                sent += 1
+            else:
+                failed += 1
+        else:
+            failed += 1
+    
+    await cb.message.edit_text(
+        f"📊 Результат:\n✅ Отправлено: {sent}\n❌ Не удалось: {failed}",
+        reply_markup=admin_kb()
+    )
 # ================= BROADCAST =================
 
 @dp.callback_query(F.data == "servers")
@@ -635,7 +866,41 @@ async def servers(cb: CallbackQuery):
     parse_mode="Markdown"
 )
 
-
+@dp.callback_query(F.data.startswith("ask_"))
+async def process_ask_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработчик нажатия на кнопку ответа"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    # Парсим данные из callback
+    # data = ask_76561197960287930_Игрок
+    parts = callback.data.split("_", 2)
+    if len(parts) < 3:
+        await callback.answer("❌ Ошибка данных", show_alert=True)
+        return
+    
+    steam_id = parts[1]
+    player_name = parts[2]
+    
+    # Сохраняем данные в state
+    await state.update_data(
+        reply_steam_id=steam_id,
+        reply_player_name=player_name
+    )
+    
+    # Устанавливаем состояние ожидания ответа
+    await state.set_state(AdminFSM.ingame_answer)
+    
+    # Отвечаем на callback и просим ввести ответ
+    await callback.answer()
+    await callback.message.answer(
+        f"✏️ Введите ответ для игрока *{player_name}* (Steam: {steam_id}):",
+        parse_mode="Markdown"
+    )
+    
+    # Можно обновить оригинальное сообщение
+    await callback.message.edit_reply_markup(reply_markup=None)
     
 @dp.callback_query(F.data == "ips")
 async def ips(cb: CallbackQuery):
@@ -776,6 +1041,23 @@ async def wipe_warning():
 
 async def main():
     await db.init()  # Инициализация БД
+    # Добавьте этот код после db.init() чтобы создать новую таблицу
+    async with aiosqlite.connect(db.path) as conn:
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS ingame_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                player_name TEXT,
+                player_steam_id TEXT,
+                message TEXT,
+                server_ip TEXT,
+                server_port INTEGER,
+                status TEXT DEFAULT 'pending',
+                reply TEXT,
+                reply_sent_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        await conn.commit()
     schedule()
     scheduler.start()
     scheduler.add_job(auto_online_log, "interval", minutes=5)
