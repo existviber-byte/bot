@@ -108,8 +108,8 @@ SERVERS = {
         "rcon_password": "Derso250499",
     },
     "x100": {
-        "host": "46.174.50.248",
-        "rcon_port": 20642,
+        "host": "78.46.56.22",
+        "rcon_port": 20502,
         "rcon_password": "Derso250499",
     }
 }
