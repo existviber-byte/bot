@@ -1,7 +1,7 @@
 import aiosqlite
 from pathlib import Path
 
-DB_PATH = Path("bot.db")
+DB_PATH = Path("data/bot.db")
 
 class Database:
     def __init__(self, path=DB_PATH):
