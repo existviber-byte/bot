@@ -25,7 +25,7 @@ db = Database()
 import os
 
 TOKEN = os.getenv("BOTIK_TOKEN")
-ADMIN_IDS = [411379361]  # Список админов
+ADMIN_IDS = [411379361,6063244390]  # Список админов
 CHAT_ID = -1001234567890
 
 DATA_DIR = Path("data")
@@ -184,10 +184,18 @@ def admin_kb():
     kb.button(text="📊 Статистика", callback_data="a_stats")
     kb.button(text="📩 Все вопросы", callback_data="a_tickets")
     kb.button(text="🎮 Сообщения с сервера", callback_data="a_ingame_messages")
-    kb.button(text="🔄 Повторная отправка", callback_data="a_retry_offline")  # И эту
+    kb.button(text="🔄 Повторная отправка", callback_data="a_retry_offline")
+    
+    # 👇 НОВЫЕ ДИАГНОСТИЧЕСКИЕ КНОПКИ 👇
+    kb.button(text="🔍 Тест RCON", callback_data="a_testrcon")
+    kb.button(text="🌐 Тест WebSocket", callback_data="a_testws")
+    kb.button(text="📁 Инфо о БД", callback_data="a_db_info")
+    kb.button(text="👥 Проверка users", callback_data="a_check_users")
+    # 👆 КОНЕЦ НОВЫХ КНОПОК 👆
+    
     kb.button(text="📢 Рассылка", callback_data="a_bc")
     kb.button(text="⬅ Назад в меню", callback_data="admin_exit")
-    kb.adjust(2)
+    kb.adjust(2)  # По 2 кнопки в ряд
     return kb.as_markup()
 
 # ================= USER =================
@@ -367,6 +375,86 @@ async def admin(m: Message):
         reply_markup=admin_kb(),
         parse_mode="HTML"
     )
+@dp.message(Command("finddb"))
+async def find_db(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    # Ищем все возможные места
+    possible_paths = [
+        Path("bot.db"),
+        Path("data/bot.db"),
+        Path("data/bot_database.db"),
+        Path("database.db"),
+        Path("data/database.db")
+    ]
+    
+    result = "🔍 Поиск БД:\n\n"
+    for path in possible_paths:
+        if path.exists():
+            size = path.stat().st_size
+            result += f"✅ {path} - {size} байт\n"
+        else:
+            result += f"❌ {path} - не найден\n"
+    
+    await message.answer(result)
+
+@dp.message(Command("checkstruct"))
+async def check_structure(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    async with aiosqlite.connect("bot.db") as conn:
+        cursor = await conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")
+        result = await cursor.fetchone()
+    
+    if result:
+        await message.answer(f"📋 Структура таблицы users:\n\n`{result[0]}`", parse_mode="Markdown")
+    else:
+        await message.answer("❌ Таблица users не найдена")
+
+@dp.message(Command("users"))
+async def show_users(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    users = await db.get_all_user_ids()
+    await message.answer(f"👥 Пользователей в БД: {len(users)}")
+    
+    if users:
+        async with aiosqlite.connect(db.path) as conn:
+            cursor = await conn.execute("SELECT first_name, username FROM users LIMIT 5")
+            names = await cursor.fetchall()
+        
+        text = "Первые 5:\n" + "\n".join([f"👤 {n[0]} (@{n[1]})" for n in names])
+        await message.answer(text)
+@dp.message(Command("debug"))
+async def debug_info(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    
+    # Проверяем путь к БД
+    db_path = db.path
+    db_exists = Path(db_path).exists()
+    db_size = Path(db_path).stat().st_size if db_exists else 0
+    
+    # Проверяем есть ли пользователи
+    users = await db.get_all_user_ids()
+    
+    # Проверяем структуру таблиц
+    async with aiosqlite.connect(db_path) as conn:
+        cursor = await conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = await cursor.fetchall()
+    
+    # Отправляем без Markdown, простым текстом
+    await message.answer(
+        f"📊 ОТЛАДКА БД\n\n"
+        f"📁 Путь: {db_path}\n"
+        f"📄 Файл существует: {db_exists}\n"
+        f"📏 Размер: {db_size} байт\n"
+        f"👥 Пользователей: {len(users)}\n"
+        f"📋 Таблицы: {', '.join([t[0] for t in tables])}"
+    )
 @dp.callback_query(F.data == "a_add")
 async def a_add(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id):
@@ -374,6 +462,136 @@ async def a_add(cb: CallbackQuery, state: FSMContext):
     await state.set_state(AdminFSM.addpromo)
     await cb.message.edit_text("✏️ Введите новый промокод:")
 
+@dp.callback_query(F.data == "a_testrcon")
+async def admin_test_rcon(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    
+    await callback.answer("🔄 Тестирую RCON...")
+    
+    results = []
+    for server_name in ["x5", "x100"]:
+        rcon = await get_rcon_client(server_name)
+        if not rcon:
+            results.append(f"❌ {server_name}: Не удалось создать подключение")
+            continue
+        
+        result = await rcon.send_command("status")
+        if result:
+            results.append(f"✅ {server_name}: RCON работает!")
+        else:
+            results.append(f"❌ {server_name}: RCON не отвечает")
+    
+    # Убираем Markdown
+    await callback.message.edit_text(
+        "🔍 РЕЗУЛЬТАТЫ ТЕСТА RCON:\n\n" + "\n".join(results),
+        reply_markup=admin_kb()
+    )
+
+@dp.callback_query(F.data == "a_testws")
+async def admin_test_ws(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    
+    await callback.answer("🔄 Тестирую WebSocket...")
+    
+    results = []
+    for server_name in ["x5", "x100"]:
+        rcon = await get_rcon_client(server_name)
+        if not rcon:
+            results.append(f"❌ {server_name}: Не удалось создать клиент")
+            continue
+        
+        result = await rcon.send_command("status")
+        if result:
+            results.append(f"✅ {server_name}: WebSocket работает!\n{result[:100]}...")
+        else:
+            results.append(f"❌ {server_name}: WebSocket не отвечает")
+    
+    # Убираем Markdown
+    await callback.message.edit_text(
+        "🌐 РЕЗУЛЬТАТЫ ТЕСТА WEBSOCKET:\n\n" + "\n".join(results),
+        reply_markup=admin_kb()
+    )
+
+@dp.callback_query(F.data == "a_db_info")
+async def admin_db_info(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    
+    # Проверяем путь к БД
+    db_path = db.path
+    db_exists = Path(db_path).exists()
+    db_size = Path(db_path).stat().st_size if db_exists else 0
+    
+    # Проверяем структуру таблиц
+    tables_info = []
+    async with aiosqlite.connect(db_path) as conn:
+        cursor = await conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = await cursor.fetchall()
+        
+        for table in tables:
+            table_name = table[0]
+            count_cursor = await conn.execute(f"SELECT COUNT(*) FROM {table_name}")
+            count = await count_cursor.fetchone()
+            tables_info.append(f"📊 {table_name}: {count[0]} записей")
+    
+    # Убираем Markdown
+    await callback.message.edit_text(
+        f"📁 ИНФОРМАЦИЯ О БД\n\n"
+        f"📌 Путь: {db_path}\n"
+        f"📄 Существует: {db_exists}\n"
+        f"📏 Размер: {db_size} байт\n\n"
+        f"📋 ТАБЛИЦЫ:\n" + "\n".join(tables_info),
+        reply_markup=admin_kb()
+    )
+
+@dp.callback_query(F.data == "a_check_users")
+async def admin_check_users(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    
+    users = await db.get_all_user_ids()
+    
+    if not users:
+        await callback.message.edit_text(
+            "👥 ПОЛЬЗОВАТЕЛИ:\n\n❌ В БД нет пользователей",
+            reply_markup=admin_kb()
+        )
+        return
+    
+    # Получаем первых 10 пользователей
+    async with aiosqlite.connect(db.path) as conn:
+        cursor = await conn.execute("""
+            SELECT first_name, username, joined_at 
+            FROM users 
+            ORDER BY joined_at DESC 
+            LIMIT 10
+        """)
+        recent_users = await cursor.fetchall()
+    
+    users_list = []
+    for name, username, joined in recent_users:
+        users_list.append(f"👤 {name} (@{username or 'нет'}) - {joined[:10] if joined else '?'}")
+    
+    # Убираем Markdown
+    await callback.message.edit_text(
+        f"👥 ВСЕГО ПОЛЬЗОВАТЕЛЕЙ: {len(users)}\n\n"
+        f"ПОСЛЕДНИЕ 10:\n" + "\n".join(users_list),
+        reply_markup=admin_kb()
+    )
+    
+@dp.callback_query(F.data == "admin_diag_back")
+async def admin_diag_back(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        return
+    
+    await callback.message.edit_text(
+        "🔧 **Диагностика**\n\nВыберите действие:",
+        parse_mode="Markdown",
+        reply_markup=admin_kb()
+    )
+    
 @dp.callback_query(F.data == "admin_exit")
 async def admin_exit(cb: CallbackQuery):
     if not is_admin(cb.from_user.id):
