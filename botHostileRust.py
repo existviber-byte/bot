@@ -341,7 +341,7 @@ async def ask_question(cb: CallbackQuery, state: FSMContext):
 
 async def auto_online_log():
     x5 = await get_server_status("37.230.137.6", 20601)
-    x100 = await get_server_status("46.174.50.248", 20641)
+    x100 = await get_server_status("78.46.56.22", 20501)
     log.info(f"AUTO ONLINE x5={x5} x100={x100}")
     
 async def wipe_notify():
@@ -877,7 +877,7 @@ async def servers(cb: CallbackQuery):
 
     x5, x100 = await asyncio.gather(
         get_server_status("37.230.137.6", 20601),
-        get_server_status("46.174.50.248", 20641)
+        get_server_status("78.46.56.22", 20501)
     )
 
     def fmt(name, data):
@@ -945,7 +945,7 @@ async def ips(cb: CallbackQuery):
 
     kb.button(
         text="📋 Скопировать Hostile x100",
-        switch_inline_query_current_chat="connect 46.174.50.248:20640"
+        switch_inline_query_current_chat="connect 78.46.56.22:20500"
     )
 
     # КНОПКА НАЗАД
