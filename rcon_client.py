@@ -102,7 +102,7 @@ class RCONClient:
 
 # Конфигурация серверов
 SERVERS = {
-    "x5": {
+    "x2": {
         "host": "37.230.137.6",
         "rcon_port": 20602,
         "rcon_password": "Derso250499",
