@@ -1275,7 +1275,7 @@ async def wipe_notify():
     users = await db.get_all_user_ids()
     for uid in users:
         try:
-            await bot.send_message(uid, "💣 ВАЙП СЕРВЕРОВ HOSTILE RUST!")
+            await bot.send_message(uid, "💣 ВАЙП на HOSTILE RUST!")
         except:
             pass
 
@@ -1283,7 +1283,7 @@ async def wipe_warning():
     users = await db.get_all_user_ids()
     for uid in users:
         try:
-            await bot.send_message(uid, "⚠️ Через 1 час вайп серверов Hostile Rust!")
+            await bot.send_message(uid, "⚠️ Через 1 час вайп на Hostile Rust!")
         except:
             pass
 # ================= START =================
