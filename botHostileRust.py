@@ -91,12 +91,12 @@ async def send_reply_to_server(steam_id, player_name, reply_text):
         if result:
             return True, "x2"
     
-    # Пробуем отправить на x100
-    rcon_x100 = await get_rcon_client("x100")
-    if rcon_x100:
-        result = await rcon_x100.send_private_message(steam_id, player_name, reply_text)
+    # Пробуем отправить на x5
+    rcon_x5 = await get_rcon_client("x5")
+    if rcon_x5:
+        result = await rcon_x5.send_private_message(steam_id, player_name, reply_text)
         if result:
-            return True, "x100"
+            return True, "x5"
     
     return False, None
 
@@ -349,8 +349,8 @@ async def ask_question(cb: CallbackQuery, state: FSMContext):
 
 async def auto_online_log():
     x2 = await get_server_status("37.230.137.6", 20601)
-    x100 = await get_server_status("5.42.211.191", 36001)
-    log.info(f"AUTO ONLINE x2={x2} x100={x100}")
+    x5 = await get_server_status("5.42.211.191", 36001)
+    log.info(f"AUTO ONLINE x2={x2} x5={x5}")
     
 async def wipe_notify():
     users = load(DATA_USERS, {})
@@ -470,7 +470,7 @@ async def admin_test_rcon(callback: CallbackQuery):
     await callback.answer("🔄 Тестирую RCON...")
     
     results = []
-    for server_name in ["x2", "x100"]:
+    for server_name in ["x2", "x5"]:
         rcon = await get_rcon_client(server_name)
         if not rcon:
             results.append(f"❌ {server_name}: Не удалось создать подключение")
@@ -496,7 +496,7 @@ async def admin_test_ws(callback: CallbackQuery):
     await callback.answer("🔄 Тестирую WebSocket...")
     
     results = []
-    for server_name in ["x2", "x100"]:
+    for server_name in ["x2", "x5"]:
         rcon = await get_rcon_client(server_name)
         if not rcon:
             results.append(f"❌ {server_name}: Не удалось создать клиент")
@@ -854,7 +854,7 @@ async def test_websocket(message: Message):
     
     await message.answer("🔄 Тестирую WebSocket RCON...")
     
-    for server in ["x2", "x100"]:
+    for server in ["x2", "x5"]:
         rcon = await get_rcon_client(server)
         if not rcon:
             await message.answer(f"❌ {server}: не удалось создать клиент")
@@ -878,7 +878,7 @@ async def test_rcon(message: Message):
     
     results = []
     
-    for server_name in ["x2", "x100"]:
+    for server_name in ["x2", "x5"]:
         rcon = await get_rcon_client(server_name)
         if not rcon:
             results.append(f"❌ {server_name}: Не удалось создать подключение")
@@ -940,7 +940,7 @@ async def view_ingame_message(cb: CallbackQuery, state: FSMContext):
     
     msg_id, player_name, steam_id, message, server_ip, server_port, status, reply, _, created = msg
     
-    server_name = "x2" if "37.230.137.6" in server_ip else "x100"
+    server_name = "x2" if "37.230.137.6" in server_ip else "x5"
     
     text = (
         f"🎮 <b>Сообщение с сервера #{msg_id}</b>\n\n"
@@ -1041,7 +1041,7 @@ async def retry_offline_messages(cb: CallbackQuery):
         msg_id, player_name, steam_id, message, server_ip, server_port, status, reply, _, created = msg
         
         # Определяем сервер
-        server_name = "x2" if "37.230.137.6" in server_ip else "x100"
+        server_name = "x2" if "37.230.137.6" in server_ip else "x5"
         rcon = await get_rcon_client(server_name)
         
         if not rcon:
@@ -1093,7 +1093,7 @@ async def retry_offline_messages(cb: CallbackQuery):
 @dp.callback_query(F.data == "servers")
 async def servers(cb: CallbackQuery):
 
-    x2, x100 = await asyncio.gather(
+    x2, x5 = await asyncio.gather(
         get_server_status("37.230.137.6", 20601),
         get_server_status("5.42.211.191", 36001)
     )
@@ -1106,7 +1106,7 @@ async def servers(cb: CallbackQuery):
     text = (
         "🎮 *Статус серверов Hostile Rust*\n\n"
         f"{fmt('x2', x2)}\n"
-        f"{fmt('x100', x100)}"
+        f"{fmt('x5', x5)}"
     )
 
     await cb.message.edit_caption(
@@ -1162,7 +1162,7 @@ async def ips(cb: CallbackQuery):
     )
 
     kb.button(
-        text="📋 Скопировать Hostile x100",
+        text="📋 Скопировать Hostile x5",
         switch_inline_query_current_chat="connect 5.42.211.191:35000"
     )
 
