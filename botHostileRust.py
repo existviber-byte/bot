@@ -1095,7 +1095,7 @@ async def servers(cb: CallbackQuery):
 
     x2, x5 = await asyncio.gather(
         get_server_status("37.230.137.6", 20601),
-        get_server_status("5.42.211.191", 36001)
+        get_server_status("5.42.211.191", 35001)
     )
 
     def fmt(name, data):
